@@ -135,31 +135,31 @@ function computeSplit() {
   for (let i=0;i<n;i++) (best[i]===0 ? teamA : teamB).push(playerIds[i]);
   teamA.sort(); teamB.sort();
 
-  const SEP = 700;               // horizontal separation between team centers
-  const ROW = 90;                // initial vertical spacing inside a team
+  const GAP = 450;               // horizontal gap between arc centers
+  const RADIUS = 280;            // arc radius per team
   const updates = [];
   for (let i=0;i<n;i++) {
     const team = best[i];
     const arr = team===0 ? teamA : teamB;
     const pos = arr.indexOf(playerIds[i]);
-    const x = team===0 ? -SEP/2 : SEP/2;
-    const y = (pos - (arr.length-1)/2) * ROW;
+    // half-circle: Blue opens right (toward center), Red opens left
+    const theta = Math.PI * (pos + 0.5) / arr.length;  // 0..pi
+    const cx = team===0 ? -GAP/2 : GAP/2;
+    const dir = team===0 ? -1 : 1;   // which way the arc bulges outward
+    const x = cx + dir * RADIUS * Math.sin(theta);
+    const y = -RADIUS * Math.cos(theta);
     updates.push({id: playerIds[i],
-      x, y,
-      fixed: {x: true, y: false},
+      x, y, fixed: true,
       color: {background: team===0 ? '#1e3a5f' : '#5f1e1e', border: NODES[i].color.border}});
   }
-  network.setOptions({physics: {
-    enabled: true, solver: 'forceAtlas2Based',
-    forceAtlas2Based: {gravitationalConstant:-120, centralGravity:0, springLength:140, springConstant:0.04, damping:0.9, avoidOverlap:1},
-    timestep: 0.3
-  }});
+  // no physics: arc is final
+  network.setOptions({physics: false});
   nodes.update(updates);
+  // unfix so user can still drag after
   setTimeout(() => {
-    network.setOptions({physics: false});
     nodes.update(playerIds.map(id => ({id, fixed: false})));
     network.fit({animation: {duration: 500}});
-  }, 1500);
+  }, 50);
   // count intra-team shared items
   let intra = 0;
   for (const e of currentEdges) if (best[idx.get(e.from)] === best[idx.get(e.to)]) intra += e.weight;
