@@ -135,8 +135,8 @@ function computeSplit() {
   for (let i=0;i<n;i++) (best[i]===0 ? teamA : teamB).push(playerIds[i]);
   teamA.sort(); teamB.sort();
 
-  const SEP = 1400;              // horizontal separation between team centers
-  const ROW = 120;               // initial vertical spacing inside a team
+  const SEP = 700;               // horizontal separation between team centers
+  const ROW = 90;                // initial vertical spacing inside a team
   const updates = [];
   for (let i=0;i<n;i++) {
     const team = best[i];
@@ -146,21 +146,20 @@ function computeSplit() {
     const y = (pos - (arr.length-1)/2) * ROW;
     updates.push({id: playerIds[i],
       x, y,
-      fixed: {x: true, y: false},  // x stays locked while physics relaxes y
+      fixed: {x: true, y: false},
       color: {background: team===0 ? '#1e3a5f' : '#5f1e1e', border: NODES[i].color.border}});
   }
-  // stronger repulsion so nodes within a team don't overlap; x stays pinned
   network.setOptions({physics: {
     enabled: true, solver: 'forceAtlas2Based',
-    forceAtlas2Based: {gravitationalConstant:-400, centralGravity:0, springLength:220, springConstant:0.02, damping:0.9, avoidOverlap:1},
+    forceAtlas2Based: {gravitationalConstant:-120, centralGravity:0, springLength:140, springConstant:0.04, damping:0.9, avoidOverlap:1},
     timestep: 0.3
   }});
   nodes.update(updates);
   setTimeout(() => {
     network.setOptions({physics: false});
-    nodes.update(playerIds.map(id => ({id, fixed: false})));  // allow manual drag
+    nodes.update(playerIds.map(id => ({id, fixed: false})));
     network.fit({animation: {duration: 500}});
-  }, 1600);
+  }, 1500);
   // count intra-team shared items
   let intra = 0;
   for (const e of currentEdges) if (best[idx.get(e.from)] === best[idx.get(e.to)]) intra += e.weight;
