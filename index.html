@@ -64,6 +64,7 @@ const ITEMS = ["Dragonspine Trophy", "Nathrezim Mindblade", "T4 Chest [PRS]", "T
 const nodes = new vis.DataSet(NODES);
 const edges = new vis.DataSet();
 let currentEdges = [];  // mirror of edges DataSet for split computation
+let activeSplit = null; // {assign: Uint8Array, teamA, teamB} when a split is shown
 
 function cbId(prefix, key){ return prefix + btoa(unescape(encodeURIComponent(key))).replace(/=/g,''); }
 function toggleAll(prefix, val){
@@ -87,8 +88,8 @@ function rebuildEdges() {
   }
   currentEdges = next;
   edges.clear(); edges.add(next);
-  // clear split coloring since graph changed
-  clearSplit();
+  // if a split is active, refresh the stats against the new filtered edges
+  if (activeSplit) updateSplitStats();
 }
 
 // --- Max-Cut via randomized local search ---
@@ -134,18 +135,24 @@ function computeSplit() {
   const teamA = [], teamB = [];
   for (let i=0;i<n;i++) (best[i]===0 ? teamA : teamB).push(playerIds[i]);
   teamA.sort(); teamB.sort();
+  activeSplit = {assign: best, teamA, teamB, idx};
 
-  const GAP = 450;               // horizontal gap between arc centers
-  const RADIUS = 280;            // arc radius per team
+  // size arcs so neighbors are ~NODE_STEP apart along the arc
+  const NODE_STEP = 100;
+  const maxTeam = Math.max(teamA.length, teamB.length);
+  // arc spans PI radians, so arcLength = PI * R; need R >= NODE_STEP * (n-1) / PI
+  const RADIUS = Math.max(280, NODE_STEP * Math.max(1, maxTeam - 1) / Math.PI);
+  const GAP = Math.max(450, RADIUS * 1.2);
   const updates = [];
   for (let i=0;i<n;i++) {
     const team = best[i];
     const arr = team===0 ? teamA : teamB;
+    const count = arr.length;
     const pos = arr.indexOf(playerIds[i]);
-    // half-circle: Blue opens right (toward center), Red opens left
-    const theta = Math.PI * (pos + 0.5) / arr.length;  // 0..pi
+    // distribute across full PI so endpoints are at top/bottom, not overlapping
+    const theta = count === 1 ? Math.PI/2 : Math.PI * pos / (count - 1);
     const cx = team===0 ? -GAP/2 : GAP/2;
-    const dir = team===0 ? -1 : 1;   // which way the arc bulges outward
+    const dir = team===0 ? -1 : 1;
     const x = cx + dir * RADIUS * Math.sin(theta);
     const y = -RADIUS * Math.cos(theta);
     updates.push({id: playerIds[i],
@@ -160,16 +167,26 @@ function computeSplit() {
     nodes.update(playerIds.map(id => ({id, fixed: false})));
     network.fit({animation: {duration: 500}});
   }, 50);
-  // count intra-team shared items
-  let intra = 0;
-  for (const e of currentEdges) if (best[idx.get(e.from)] === best[idx.get(e.to)]) intra += e.weight;
+  updateSplitStats();
+}
+
+function updateSplitStats() {
+  if (!activeSplit) return;
+  const {assign, teamA, teamB, idx} = activeSplit;
+  let cross = 0, intra = 0;
+  for (const e of currentEdges) {
+    if (assign[idx.get(e.from)] !== assign[idx.get(e.to)]) cross += e.weight;
+    else intra += e.weight;
+  }
   document.getElementById('splitInfo').innerHTML =
-    '<b style="color:#6aa0e0">Team Blue:</b> ' + teamA.sort().join(', ') +
-    '<br><br><b style="color:#e06a6a">Team Red:</b> ' + teamB.sort().join(', ') +
-    '<br><br>Cross-team shared items: <b>' + bestVal + '</b>' +
+    '<b style="color:#6aa0e0">Team Blue:</b> ' + teamA.join(', ') +
+    '<br><br><b style="color:#e06a6a">Team Red:</b> ' + teamB.join(', ') +
+    '<br><br>Cross-team shared items: <b>' + cross + '</b>' +
     '<br>Within-team conflicts: <b>' + intra + '</b>';
 }
+
 function clearSplit() {
+  activeSplit = null;
   nodes.update(NODES.map(n => ({id: n.id, color: n.color})));
   document.getElementById('splitInfo').innerHTML = '';
 }
