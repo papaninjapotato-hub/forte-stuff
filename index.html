@@ -130,16 +130,34 @@ function computeSplit() {
     const v = cutValue(a);
     if (v > bestVal) { bestVal = v; best = a; }
   }
-  // color nodes
+  // color nodes + push left/right
   const teamA = [], teamB = [];
   const updates = [];
+  const SEP = 600;  // horizontal separation between team centers
   for (let i=0;i<n;i++) {
     const team = best[i];
     (team===0 ? teamA : teamB).push(playerIds[i]);
+  }
+  // deterministic y spread within each team
+  function yFor(arr, id){ return (arr.indexOf(id) - (arr.length-1)/2) * 80; }
+  for (let i=0;i<n;i++) {
+    const team = best[i];
+    const arr = team===0 ? teamA : teamB;
+    const x = team===0 ? -SEP/2 : SEP/2;
     updates.push({id: playerIds[i],
+      x: x, y: yFor(arr.sort(), playerIds[i]),
+      fixed: {x: true, y: false},
       color: {background: team===0 ? '#1e3a5f' : '#5f1e1e', border: NODES[i].color.border}});
   }
+  // turn physics on briefly so the y-positions relax against edges, then refreeze
+  network.setOptions({physics: {enabled: true}});
   nodes.update(updates);
+  setTimeout(() => {
+    network.setOptions({physics: false});
+    // unfix so user can drag freely afterwards
+    nodes.update(playerIds.map(id => ({id, fixed: false})));
+    network.fit({animation: {duration: 500}});
+  }, 1200);
   // count intra-team shared items
   let intra = 0;
   for (const e of currentEdges) if (best[idx.get(e.from)] === best[idx.get(e.to)]) intra += e.weight;
