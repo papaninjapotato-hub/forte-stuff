@@ -132,32 +132,35 @@ function computeSplit() {
   }
   // color nodes + push left/right
   const teamA = [], teamB = [];
+  for (let i=0;i<n;i++) (best[i]===0 ? teamA : teamB).push(playerIds[i]);
+  teamA.sort(); teamB.sort();
+
+  const SEP = 1400;              // horizontal separation between team centers
+  const ROW = 120;               // initial vertical spacing inside a team
   const updates = [];
-  const SEP = 600;  // horizontal separation between team centers
-  for (let i=0;i<n;i++) {
-    const team = best[i];
-    (team===0 ? teamA : teamB).push(playerIds[i]);
-  }
-  // deterministic y spread within each team
-  function yFor(arr, id){ return (arr.indexOf(id) - (arr.length-1)/2) * 80; }
   for (let i=0;i<n;i++) {
     const team = best[i];
     const arr = team===0 ? teamA : teamB;
+    const pos = arr.indexOf(playerIds[i]);
     const x = team===0 ? -SEP/2 : SEP/2;
+    const y = (pos - (arr.length-1)/2) * ROW;
     updates.push({id: playerIds[i],
-      x: x, y: yFor(arr.sort(), playerIds[i]),
-      fixed: {x: true, y: false},
+      x, y,
+      fixed: {x: true, y: false},  // x stays locked while physics relaxes y
       color: {background: team===0 ? '#1e3a5f' : '#5f1e1e', border: NODES[i].color.border}});
   }
-  // turn physics on briefly so the y-positions relax against edges, then refreeze
-  network.setOptions({physics: {enabled: true}});
+  // stronger repulsion so nodes within a team don't overlap; x stays pinned
+  network.setOptions({physics: {
+    enabled: true, solver: 'forceAtlas2Based',
+    forceAtlas2Based: {gravitationalConstant:-400, centralGravity:0, springLength:220, springConstant:0.02, damping:0.9, avoidOverlap:1},
+    timestep: 0.3
+  }});
   nodes.update(updates);
   setTimeout(() => {
     network.setOptions({physics: false});
-    // unfix so user can drag freely afterwards
-    nodes.update(playerIds.map(id => ({id, fixed: false})));
+    nodes.update(playerIds.map(id => ({id, fixed: false})));  // allow manual drag
     network.fit({animation: {duration: 500}});
-  }, 1200);
+  }, 1600);
   // count intra-team shared items
   let intra = 0;
   for (const e of currentEdges) if (best[idx.get(e.from)] === best[idx.get(e.to)]) intra += e.weight;
