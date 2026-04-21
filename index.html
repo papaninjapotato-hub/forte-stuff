@@ -45,6 +45,12 @@
 <label><input type="checkbox" id="i_VDQgQ2hlc3QgW1dEUF0" checked> T4 Chest [WDP] <span style="color:#888">(2)</span></label>
 <label><input type="checkbox" id="i_VDQgSGVhZCBbSE1XXQ" checked> T4 Head [HMW] <span style="color:#888">(2)</span></label>
 <label><input type="checkbox" id="i_VDQgU2hvdWxkZXJzIFtQUlNd" checked> T4 Shoulders [PRS] <span style="color:#888">(2)</span></label>
+    <h3>Split into 2 teams</h3>
+    <div class="btns">
+      <button onclick="computeSplit()">Minimize shared items</button>
+      <button onclick="clearSplit()">Clear</button>
+    </div>
+    <div id="splitInfo" class="muted"></div>
     <div class="muted">Edges appear only for items in both filters.</div>
   </div>
   <div id="net"></div>
@@ -57,6 +63,7 @@ const ITEMS = ["Dragonspine Trophy", "Nathrezim Mindblade", "T4 Chest [PRS]", "T
 
 const nodes = new vis.DataSet(NODES);
 const edges = new vis.DataSet();
+let currentEdges = [];  // mirror of edges DataSet for split computation
 
 function cbId(prefix, key){ return prefix + btoa(unescape(encodeURIComponent(key))).replace(/=/g,''); }
 function toggleAll(prefix, val){
@@ -74,10 +81,77 @@ function rebuildEdges() {
     next.push({
       from: e.from, to: e.to,
       value: matched.length,
+      weight: matched.length,
       title: matched.length + ' shared:\n• ' + matched.map(i => i.item+' ('+i.raid+')').join('\n• ')
     });
   }
+  currentEdges = next;
   edges.clear(); edges.add(next);
+  // clear split coloring since graph changed
+  clearSplit();
+}
+
+// --- Max-Cut via randomized local search ---
+function computeSplit() {
+  const playerIds = NODES.map(n => n.id);
+  const idx = new Map(playerIds.map((p,i)=>[p,i]));
+  const n = playerIds.length;
+  // adjacency weights
+  const W = Array.from({length:n}, ()=>new Float64Array(n));
+  for (const e of currentEdges) {
+    const a = idx.get(e.from), b = idx.get(e.to);
+    W[a][b] += e.weight; W[b][a] += e.weight;
+  }
+  function cutValue(assign) {
+    let s = 0;
+    for (let i=0;i<n;i++) for (let j=i+1;j<n;j++)
+      if (assign[i] !== assign[j]) s += W[i][j];
+    return s;
+  }
+  function localOpt(assign) {
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (let i=0;i<n;i++) {
+        let delta = 0;
+        for (let j=0;j<n;j++) if (j!==i) {
+          delta += (assign[i]===assign[j] ? W[i][j] : -W[i][j]);
+        }
+        if (delta > 0) { assign[i] ^= 1; improved = true; }
+      }
+    }
+    return assign;
+  }
+  let best = null, bestVal = -1;
+  for (let trial=0; trial<200; trial++) {
+    const a = new Uint8Array(n);
+    for (let i=0;i<n;i++) a[i] = Math.random()<0.5 ? 0 : 1;
+    localOpt(a);
+    const v = cutValue(a);
+    if (v > bestVal) { bestVal = v; best = a; }
+  }
+  // color nodes
+  const teamA = [], teamB = [];
+  const updates = [];
+  for (let i=0;i<n;i++) {
+    const team = best[i];
+    (team===0 ? teamA : teamB).push(playerIds[i]);
+    updates.push({id: playerIds[i],
+      color: {background: team===0 ? '#1e3a5f' : '#5f1e1e', border: NODES[i].color.border}});
+  }
+  nodes.update(updates);
+  // count intra-team shared items
+  let intra = 0;
+  for (const e of currentEdges) if (best[idx.get(e.from)] === best[idx.get(e.to)]) intra += e.weight;
+  document.getElementById('splitInfo').innerHTML =
+    '<b style="color:#6aa0e0">Team Blue:</b> ' + teamA.sort().join(', ') +
+    '<br><br><b style="color:#e06a6a">Team Red:</b> ' + teamB.sort().join(', ') +
+    '<br><br>Cross-team shared items: <b>' + bestVal + '</b>' +
+    '<br>Within-team conflicts: <b>' + intra + '</b>';
+}
+function clearSplit() {
+  nodes.update(NODES.map(n => ({id: n.id, color: n.color})));
+  document.getElementById('splitInfo').innerHTML = '';
 }
 
 const network = new vis.Network(document.getElementById('net'), {nodes, edges}, {
