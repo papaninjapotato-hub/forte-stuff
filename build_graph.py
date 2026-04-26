@@ -205,6 +205,8 @@ let activeSplit = null; // {assign: Uint8Array, teamA, teamB} when a split is sh
 let raidLayoutActive = false;
 let addedNodeIds = [];
 let activePlayerRaid = {}; // player -> raid name when layout is active
+let raidOrder = []; // raid names in layout order
+let raidDrawHandler = null;
 
 function cbId(prefix, key){ return prefix + btoa(unescape(encodeURIComponent(key))).replace(/=/g,''); }
 function toggleAll(prefix, val){
@@ -240,7 +242,7 @@ function rebuildEdges() {
       from: e.from, to: e.to,
       value: matched.length,
       weight: matched.length,
-      title: matched.length + ' shared:<br>• ' + matched.map(i => i.item+' ('+i.raid+')').join('<br>• ')
+      title: matched.length + ' shared:\\n\\u2022 ' + matched.map(i => i.item+' ('+i.raid+')').join('\\n\\u2022 ')
     });
   }
   currentEdges = next;
@@ -450,15 +452,13 @@ function applyRaidImport() {
   raidLayoutActive = true;
 
   // clean up previous import if any
-  nodes.get().filter(n => n.id && n.id.startsWith('__bg_')).forEach(n => nodes.remove(n.id));
-  for (const id of addedNodeIds) nodes.remove(id);
+  for (const id of addedNodeIds) { if (nodes.get(id)) nodes.remove(id); }
   addedNodeIds = [];
-  nodes.update(NODES.map(n => ({id: n.id, hidden: false})));
+  nodes.update(NODES.map(n => ({id: n.id, hidden: false, fixed: false})));
 
   const knownIds = new Set(NODES.map(n => n.id));
 
   // add nodes for unknown players using JSON class color, dashed border
-  addedNodeIds = [];
   for (const members of Object.values(runs)) {
     for (const p of members) {
       if (!knownIds.has(p.name) && !nodes.get(p.name)) {
@@ -476,76 +476,82 @@ function applyRaidImport() {
     }
   }
 
-  // layout
-  const raidNames = Object.keys(runs).sort();
-  const COL_W = 200, ROW_H = 80, PAD = 60, BOX_GAP = 80;
-  const COLS = 5;
+  // seed initial positions: grid per raid, raids laid out left-to-right
+  raidOrder = Object.keys(runs).sort();
+  const COL_W = 220, ROW_H = 140, COLS = 5, RAID_GAP = 260;
   let offsetX = 0;
-
   const updates = [];
-  for (const raidName of raidNames) {
+  for (const raidName of raidOrder) {
     const members = runs[raidName];
-    const rows = Math.ceil(members.length / COLS);
     const cols = Math.min(members.length, COLS);
-    const boxW = cols * COL_W + PAD * 2;
-    const boxH = rows * ROW_H + PAD * 2 + 40;
-
-    // position members in grid
+    const blockW = cols * COL_W;
     for (let i = 0; i < members.length; i++) {
       const col = i % COLS, row = Math.floor(i / COLS);
-      const x = offsetX + PAD + col * COL_W + COL_W / 2;
-      const y = PAD + 40 + row * ROW_H + ROW_H / 2;
-      updates.push({id: members[i].name, x, y, fixed: true});
+      updates.push({
+        id: members[i].name,
+        x: offsetX + col * COL_W - blockW / 2 + COL_W / 2,
+        y: row * ROW_H
+      });
     }
-
-    // background box node (invisible large box)
-    nodes.add({
-      id: '__bg_' + raidName,
-      label: raidName,
-      shape: 'box',
-      x: offsetX + boxW / 2,
-      y: boxH / 2,
-      fixed: true,
-      color: {background: 'rgba(255,255,255,0.04)', border: '#555',
-              highlight: {background: 'rgba(255,255,255,0.04)', border: '#555'}},
-      borderWidth: 2,
-      font: {size: 22, color: '#aaa', face: 'sans-serif', vadjust: -(boxH/2 - 18)},
-      widthConstraint: boxW,
-      margin: {top: boxH / 2 - 18, bottom: boxH / 2 - 18, left: 0, right: 0},
-      physics: false,
-      chosen: false,
-      selectable: false
-    });
-
-    offsetX += boxW + BOX_GAP;
+    offsetX += blockW + RAID_GAP;
   }
 
-  // build player->raid mapping
+  // player -> raid mapping (drives edge filtering + raid boxes)
   activePlayerRaid = {};
   for (const [raidName, members] of Object.entries(runs)) {
     for (const m of members) activePlayerRaid[m.name] = raidName;
   }
 
-  network.setOptions({physics: false});
-  nodes.update(updates);
-
-  // rebuild edges (will auto-filter within-raid)
-  rebuildEdges();
-
-  // hide nodes not in any raid
+  // hide players not in any raid
   const allRaidPlayers = new Set(Object.values(runs).flat().map(p => p.name));
   for (const n of NODES) {
-    if (!allRaidPlayers.has(n.id)) {
-      nodes.update({id: n.id, hidden: true});
-    }
+    if (!allRaidPlayers.has(n.id)) updates.push({id: n.id, hidden: true});
   }
 
+  nodes.update(updates);
+
+  // physics off: nodes stay where placed, still draggable
+  network.setOptions({physics: false});
+
+  // install per-raid bounding-box renderer (drawn under nodes)
+  if (raidDrawHandler) network.off('beforeDrawing', raidDrawHandler);
+  raidDrawHandler = (ctx) => {
+    const positions = network.getPositions();
+    for (const raidName of raidOrder) {
+      const members = (runs[raidName] || []).map(m => m.name).filter(id => positions[id]);
+      if (members.length === 0) continue;
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      for (const id of members) {
+        const p = positions[id];
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+      }
+      const PAD = 80;
+      minX -= PAD; maxX += PAD; minY -= PAD + 30; maxY += PAD;
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.03)';
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.rect(minX, minY, maxX - minX, maxY - minY);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#aaa';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText(raidName, minX + 10, minY + 6);
+      ctx.restore();
+    }
+  };
+  network.on('beforeDrawing', raidDrawHandler);
+
+  rebuildEdges();
   setTimeout(() => network.fit({animation: {duration: 500}}), 50);
 
   // info
   function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   let info = '';
-  for (const rn of raidNames) {
+  for (const rn of raidOrder) {
     info += '<b>' + esc(rn) + '</b>: ' + runs[rn].map(p => esc(p.name)).join(', ') + '<br>';
   }
   info += '<br>Within-raid conflicts: <b>' + currentEdges.length + '</b>';
@@ -556,16 +562,15 @@ function clearRaidLayout() {
   if (!raidLayoutActive) return;
   raidLayoutActive = false;
   activePlayerRaid = {};
+  raidOrder = [];
 
-  // remove background boxes and added nodes
-  nodes.get().filter(n => n.id && n.id.startsWith('__bg_')).forEach(n => nodes.remove(n.id));
-  for (const id of addedNodeIds) nodes.remove(id);
+  if (raidDrawHandler) { network.off('beforeDrawing', raidDrawHandler); raidDrawHandler = null; }
+
+  for (const id of addedNodeIds) { if (nodes.get(id)) nodes.remove(id); }
   addedNodeIds = [];
 
-  // unhide and unfix all original nodes
   nodes.update(NODES.map(n => ({id: n.id, hidden: false, fixed: false, color: n.color})));
 
-  // run stabilization once then freeze
   network.setOptions({
     physics: {enabled: true, solver: 'forceAtlas2Based',
       forceAtlas2Based: {gravitationalConstant:-80, springLength:180, springConstant:0.02, damping:0.9},
