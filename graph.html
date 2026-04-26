@@ -36,6 +36,7 @@
     <h3>Raid Setup</h3>
     <div class="btns">
       <button onclick="showImportModal()">Import Raid Setup</button>
+      <button onclick="revertRaidLayout()">Revert Swaps</button>
       <button onclick="clearRaidLayout()">Clear Layout</button>
     </div>
     <div id="raidInfo" class="muted"></div>
@@ -109,7 +110,10 @@ let raidLayoutActive = false;
 let addedNodeIds = [];
 let activePlayerRaid = {}; // player -> raid name when layout is active
 let raidOrder = []; // raid names in layout order
+let raidRuns = null; // raid name -> [{name, className, color}]
+let originalRunsJson = null; // snapshot of raw JSON text from last import
 let raidDrawHandler = null;
+let selectedPlayer = null;
 
 function cbId(prefix, key){ return prefix + btoa(unescape(encodeURIComponent(key))).replace(/=/g,''); }
 function toggleAll(prefix, val){
@@ -301,6 +305,44 @@ network.once('stabilizationIterationsDone', () => network.setOptions({physics: f
 document.querySelectorAll('#side input[type=checkbox]').forEach(c => c.addEventListener('change', rebuildEdges));
 rebuildEdges();
 
+// --- Swap players between raid boxes ---
+function setSelection(id) {
+  if (selectedPlayer && selectedPlayer !== id) nodes.update({id: selectedPlayer, borderWidth: 6});
+  selectedPlayer = id;
+  if (id) nodes.update({id, borderWidth: 14});
+}
+function swapPlayers(aId, bId) {
+  const raidA = activePlayerRaid[aId], raidB = activePlayerRaid[bId];
+  if (!raidA || !raidB || raidA === raidB) return;
+  // swap positions
+  const pos = network.getPositions([aId, bId]);
+  nodes.update([
+    {id: aId, x: pos[bId].x, y: pos[bId].y, borderWidth: 6},
+    {id: bId, x: pos[aId].x, y: pos[aId].y, borderWidth: 6}
+  ]);
+  // swap raid membership
+  activePlayerRaid[aId] = raidB; activePlayerRaid[bId] = raidA;
+  const ia = raidRuns[raidA].findIndex(m => m.name === aId);
+  const ib = raidRuns[raidB].findIndex(m => m.name === bId);
+  if (ia >= 0 && ib >= 0) {
+    const ma = raidRuns[raidA][ia], mb = raidRuns[raidB][ib];
+    raidRuns[raidA][ia] = mb;
+    raidRuns[raidB][ib] = ma;
+  }
+  selectedPlayer = null;
+  rebuildEdges();
+  network.redraw();
+}
+network.on('click', params => {
+  if (!raidLayoutActive) return;
+  const id = params.nodes[0];
+  if (!id || !activePlayerRaid[id]) { setSelection(null); return; }
+  if (!selectedPlayer) { setSelection(id); return; }
+  if (selectedPlayer === id) { setSelection(null); return; }
+  if (activePlayerRaid[selectedPlayer] === activePlayerRaid[id]) { setSelection(id); return; }
+  swapPlayers(selectedPlayer, id);
+});
+
 // --- Raid Setup Import ---
 
 function showImportModal() {
@@ -369,6 +411,7 @@ function applyRaidImport() {
     alert('Invalid JSON: ' + e.message);
     return;
   }
+  originalRunsJson = document.getElementById('raidJson').value;
   hideModal();
   raidLayoutActive = true;
 
@@ -434,6 +477,7 @@ function applyRaidImport() {
   }
 
   nodes.update(updates);
+  raidRuns = runs;
 
   // physics off: nodes stay where placed, still draggable
   network.setOptions({physics: false});
@@ -443,7 +487,7 @@ function applyRaidImport() {
   raidDrawHandler = (ctx) => {
     const positions = network.getPositions();
     for (const raidName of raidOrder) {
-      const members = (runs[raidName] || []).map(m => m.name).filter(id => positions[id]);
+      const members = (raidRuns[raidName] || []).map(m => m.name).filter(id => positions[id]);
       if (members.length === 0) continue;
       let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
       for (const id of members) {
@@ -483,11 +527,20 @@ function applyRaidImport() {
   document.getElementById('raidInfo').innerHTML = info;
 }
 
+function revertRaidLayout() {
+  if (!originalRunsJson) return;
+  document.getElementById('raidJson').value = originalRunsJson;
+  applyRaidImport();
+}
+
 function clearRaidLayout() {
   if (!raidLayoutActive) return;
   raidLayoutActive = false;
   activePlayerRaid = {};
   raidOrder = [];
+  raidRuns = null;
+  originalRunsJson = null;
+  selectedPlayer = null;
 
   if (raidDrawHandler) { network.off('beforeDrawing', raidDrawHandler); raidDrawHandler = null; }
 
