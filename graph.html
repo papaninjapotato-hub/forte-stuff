@@ -293,7 +293,7 @@ const network = new vis.Network(document.getElementById('net'), {nodes, edges}, 
     stabilization: {enabled: true, iterations: 1000, fit: true},
     timestep: 0.3
   },
-  edges: {smooth: false, width: 2, hoverWidth: 4, color: {color: '#666', hover: '#aaa'}},
+  edges: {smooth: false, width: 2, hoverWidth: 4},
   interaction: {dragNodes: true, hover: true, zoomView: true, zoomSpeed: 0.3, tooltipDelay: 100, navigationButtons: true}
 });
 network.once('stabilizationIterationsDone', () => network.setOptions({physics: false}));
@@ -397,24 +397,28 @@ function applyRaidImport() {
     }
   }
 
-  // seed initial positions: grid per raid, raids laid out left-to-right
+  // seed initial positions: circle per raid, raids laid out left-to-right
   raidOrder = Object.keys(runs).sort();
-  const COL_W = 220, ROW_H = 140, COLS = 5, RAID_GAP = 260;
+  const NODE_STEP = 140;   // target arc spacing between neighbours
+  const MIN_R = 140;
+  const RAID_GAP = 260;
   let offsetX = 0;
   const updates = [];
   for (const raidName of raidOrder) {
     const members = runs[raidName];
-    const cols = Math.min(members.length, COLS);
-    const blockW = cols * COL_W;
-    for (let i = 0; i < members.length; i++) {
-      const col = i % COLS, row = Math.floor(i / COLS);
+    const n = members.length;
+    // circumference = n * NODE_STEP → R = n * NODE_STEP / (2π)
+    const R = Math.max(MIN_R, n * NODE_STEP / (2 * Math.PI));
+    const cx = offsetX + R;
+    for (let i = 0; i < n; i++) {
+      const theta = 2 * Math.PI * i / n - Math.PI / 2;
       updates.push({
         id: members[i].name,
-        x: offsetX + col * COL_W - blockW / 2 + COL_W / 2,
-        y: row * ROW_H
+        x: cx + R * Math.cos(theta),
+        y: R * Math.sin(theta)
       });
     }
-    offsetX += blockW + RAID_GAP;
+    offsetX += 2 * R + RAID_GAP;
   }
 
   // player -> raid mapping (drives edge filtering + raid boxes)
