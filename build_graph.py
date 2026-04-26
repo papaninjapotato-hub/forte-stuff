@@ -418,7 +418,10 @@ document.querySelectorAll('#side input[type=checkbox]').forEach(c => c.addEventL
 rebuildEdges();
 
 // --- Swap players between raid boxes ---
+let blinkTimer = null;
+let blinkPhase = false;
 function setSelection(id) {
+  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; }
   if (selectedPlayer && selectedPlayer !== id) {
     const n = nodes.get(selectedPlayer);
     if (n && n._origColor) nodes.update({id: selectedPlayer, color: n._origColor, _origColor: null});
@@ -428,9 +431,14 @@ function setSelection(id) {
     const n = nodes.get(id);
     const orig = n._origColor || n.color;
     const border = orig.border;
-    const hi = {background: '#2d7a8a', border,
-                highlight: {background: '#2d7a8a', border}};
-    nodes.update({id, _origColor: orig, color: hi});
+    const hi = (bg) => ({background: bg, border, highlight: {background: bg, border}});
+    nodes.update({id, _origColor: orig, color: hi('#2d7a8a')});
+    blinkPhase = false;
+    blinkTimer = setInterval(() => {
+      if (!selectedPlayer) return;
+      blinkPhase = !blinkPhase;
+      nodes.update({id: selectedPlayer, color: hi(blinkPhase ? '#1a4a55' : '#2d7a8a')});
+    }, 700);
   }
 }
 function restoreNodeColor(id) {
