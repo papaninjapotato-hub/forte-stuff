@@ -223,6 +223,7 @@ const network = new vis.Network(document.getElementById('net'), {nodes, edges}, 
     stabilization: {enabled: true, iterations: 1000, fit: true},
     timestep: 0.3
   },
+  edges: {smooth: false},
   interaction: {dragNodes: true, hover: true}
 });
 network.once('stabilizationIterationsDone', () => network.setOptions({physics: false}));
