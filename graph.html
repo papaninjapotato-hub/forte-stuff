@@ -307,9 +307,23 @@ rebuildEdges();
 
 // --- Swap players between raid boxes ---
 function setSelection(id) {
-  if (selectedPlayer && selectedPlayer !== id) nodes.update({id: selectedPlayer, borderWidth: 6});
+  if (selectedPlayer && selectedPlayer !== id) {
+    const n = nodes.get(selectedPlayer);
+    nodes.update({id: selectedPlayer, borderWidth: 6, color: n._origColor || n.color});
+  }
   selectedPlayer = id;
-  if (id) nodes.update({id, borderWidth: 14});
+  if (id) {
+    const n = nodes.get(id);
+    const orig = n._origColor || n.color;
+    nodes.update({id, borderWidth: 10, _origColor: orig,
+      color: {background: '#4a3a00', border: '#ffd84a',
+              highlight: {background: '#4a3a00', border: '#ffd84a'}}});
+  }
+}
+function restoreNodeColor(id) {
+  const n = nodes.get(id);
+  if (n && n._origColor) nodes.update({id, borderWidth: 6, color: n._origColor, _origColor: null});
+  else nodes.update({id, borderWidth: 6});
 }
 function swapPlayers(aId, bId) {
   const raidA = activePlayerRaid[aId], raidB = activePlayerRaid[bId];
@@ -317,9 +331,10 @@ function swapPlayers(aId, bId) {
   // swap positions
   const pos = network.getPositions([aId, bId]);
   nodes.update([
-    {id: aId, x: pos[bId].x, y: pos[bId].y, borderWidth: 6},
-    {id: bId, x: pos[aId].x, y: pos[aId].y, borderWidth: 6}
+    {id: aId, x: pos[bId].x, y: pos[bId].y},
+    {id: bId, x: pos[aId].x, y: pos[aId].y}
   ]);
+  restoreNodeColor(aId); restoreNodeColor(bId);
   // swap raid membership
   activePlayerRaid[aId] = raidB; activePlayerRaid[bId] = raidA;
   const ia = raidRuns[raidA].findIndex(m => m.name === aId);
