@@ -1,4 +1,16 @@
-import csv, re, json
+import csv, re, json, sys, argparse
+
+ap = argparse.ArgumentParser(description="Build the Forte gear collision graph page(s).")
+ap.add_argument("targets", nargs="*",
+                help="beta→graph.html, stable→index.html (reduced), promote→beta HTML to index.html, all→beta+promote. Default: beta stable.")
+args = ap.parse_args()
+TARGETS = set(args.targets) or {"beta", "stable"}
+_valid = {"beta", "stable", "promote", "all"}
+_bad = TARGETS - _valid
+if _bad: sys.exit(f"error: unknown target(s): {sorted(_bad)}; choose from {sorted(_valid)}")
+if "all" in TARGETS: TARGETS = {"beta", "promote"}
+if "stable" in TARGETS and "promote" in TARGETS:
+    sys.exit("error: 'stable' and 'promote' both write index.html — pick one.")
 from collections import defaultdict
 from itertools import combinations
 
@@ -156,27 +168,30 @@ html = """<!doctype html>
 <body><div id="wrap">
   <div id="side">
     <div style="text-align:right;margin-bottom:8px"><a href="index.html" style="color:#aaa;font-size:13px;text-decoration:none">&larr; Stable</a> <span style="color:#6af;font-size:13px;border:1px solid #6af;padding:3px 10px;border-radius:3px">&#129514; Beta</span></div>
-    <h3>Loot Sources</h3>
-    __RAID_CHECKBOXES__
-    <h3>Items</h3>
-    <div class="btns">
-      <button onclick="toggleAll('i_',true)">All</button>
-      <button onclick="toggleAll('i_',false)">None</button>
-    </div>
-    __ITEM_CHECKBOXES__
     <h3>Split into 2 teams</h3>
     <div class="btns">
       <button onclick="computeSplit()">Minimize shared items</button>
       <button onclick="clearSplit()">Clear</button>
     </div>
     <div id="splitInfo" class="muted"></div>
-    <div class="muted">Edges appear only for items in both filters.</div>
     <h3>Raid Setup</h3>
     <div class="btns">
       <button onclick="showImportModal()">Import Raid Setup</button>
       <button onclick="clearRaidLayout()">Clear Layout</button>
     </div>
     <div id="raidInfo" class="muted"></div>
+    <h3>Loot Sources</h3>
+    __RAID_CHECKBOXES__
+    <h3>Items</h3>
+    <div class="btns">
+      <button onclick="toggleAll('i_',true)">All</button>
+      <button onclick="toggleAll('i_',false)">None</button>
+      <button id="itemToggleBtn" onclick="toggleItemList()">Show all</button>
+    </div>
+    <div id="itemList" class="collapsed">
+    __ITEM_CHECKBOXES__
+    </div>
+    <div class="muted">Edges appear only for items in both filters.</div>
   </div>
   <div id="net"></div>
 </div>
@@ -210,20 +225,38 @@ let raidDrawHandler = null;
 
 function cbId(prefix, key){ return prefix + btoa(unescape(encodeURIComponent(key))).replace(/=/g,''); }
 function toggleAll(prefix, val){
-  document.querySelectorAll('input[id^="'+prefix+'"]').forEach(c => {
-    if (c.closest('label').style.display !== 'none') c.checked = val;
-  });
+  if (prefix === 'i_') {
+    const activeRaids = new Set(RAIDS.filter(r => document.getElementById(cbId('r_',r)).checked));
+    for (const item of ITEMS) {
+      const raids = ITEM_RAIDS[item] || [];
+      if (raids.some(r => activeRaids.has(r))) document.getElementById(cbId('i_',item)).checked = val;
+    }
+  } else {
+    document.querySelectorAll('input[id^="'+prefix+'"]').forEach(c => { c.checked = val; });
+  }
   rebuildEdges();
 }
 
 function filterItemCheckboxes() {
   const activeRaids = new Set(RAIDS.filter(r => document.getElementById(cbId('r_',r)).checked));
+  const collapsed = document.getElementById('itemList').classList.contains('collapsed');
+  let shown = 0;
   for (const item of ITEMS) {
     const raids = ITEM_RAIDS[item] || [];
-    const visible = raids.some(r => activeRaids.has(r));
+    const raidVisible = raids.some(r => activeRaids.has(r));
     const lbl = document.getElementById(cbId('i_',item)).closest('label');
-    lbl.style.display = visible ? '' : 'none';
+    if (!raidVisible) { lbl.style.display = 'none'; continue; }
+    if (collapsed && shown >= 5) { lbl.style.display = 'none'; continue; }
+    lbl.style.display = '';
+    shown++;
   }
+}
+function toggleItemList() {
+  const list = document.getElementById('itemList');
+  const btn = document.getElementById('itemToggleBtn');
+  list.classList.toggle('collapsed');
+  btn.textContent = list.classList.contains('collapsed') ? 'Show all' : 'Show top 5';
+  filterItemCheckboxes();
 }
 
 function rebuildEdges() {
@@ -372,7 +405,7 @@ const network = new vis.Network(document.getElementById('net'), {nodes, edges}, 
     stabilization: {enabled: true, iterations: 1000, fit: true},
     timestep: 0.3
   },
-  edges: {smooth: false, width: 2, hoverWidth: 4, color: {color: '#666', hover: '#aaa'}},
+  edges: {smooth: false, width: 2, hoverWidth: 4},
   interaction: {dragNodes: true, hover: true, zoomView: true, zoomSpeed: 0.3, tooltipDelay: 100, navigationButtons: true}
 });
 network.once('stabilizationIterationsDone', () => network.setOptions({physics: false}));
@@ -476,24 +509,28 @@ function applyRaidImport() {
     }
   }
 
-  // seed initial positions: grid per raid, raids laid out left-to-right
+  // seed initial positions: circle per raid, raids laid out left-to-right
   raidOrder = Object.keys(runs).sort();
-  const COL_W = 220, ROW_H = 140, COLS = 5, RAID_GAP = 260;
+  const NODE_STEP = 140;   // target arc spacing between neighbours
+  const MIN_R = 140;
+  const RAID_GAP = 260;
   let offsetX = 0;
   const updates = [];
   for (const raidName of raidOrder) {
     const members = runs[raidName];
-    const cols = Math.min(members.length, COLS);
-    const blockW = cols * COL_W;
-    for (let i = 0; i < members.length; i++) {
-      const col = i % COLS, row = Math.floor(i / COLS);
+    const n = members.length;
+    // circumference = n * NODE_STEP → R = n * NODE_STEP / (2π)
+    const R = Math.max(MIN_R, n * NODE_STEP / (2 * Math.PI));
+    const cx = offsetX + R;
+    for (let i = 0; i < n; i++) {
+      const theta = 2 * Math.PI * i / n - Math.PI / 2;
       updates.push({
         id: members[i].name,
-        x: offsetX + col * COL_W - blockW / 2 + COL_W / 2,
-        y: row * ROW_H
+        x: cx + R * Math.cos(theta),
+        y: R * Math.sin(theta)
       });
     }
-    offsetX += blockW + RAID_GAP;
+    offsetX += 2 * R + RAID_GAP;
   }
 
   // player -> raid mapping (drives edge filtering + raid boxes)
@@ -608,9 +645,15 @@ html = (html
     .replace("__ITEMS__", json.dumps(items_all))
     .replace("__ITEM_RAIDS__", json.dumps(item_raids)))
 
-with open("graph.html", "w", encoding="utf-8") as f:
-    f.write(html)
-print(f"wrote graph.html  ({len(nodes)} nodes, {len(edges)} edges, {len(raids)} raids, {len(items_all)} items)")
+if "beta" in TARGETS:
+    with open("graph.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"wrote graph.html  ({len(nodes)} nodes, {len(edges)} edges, {len(raids)} raids, {len(items_all)} items)")
+
+if "promote" in TARGETS:
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"wrote index.html  (promoted beta)")
 
 # --- Stable page (index.html) — same data, no raid import ---
 stable_html = """<!doctype html>
@@ -633,20 +676,23 @@ stable_html = """<!doctype html>
 <body><div id="wrap">
   <div id="side">
     <div style="text-align:right;margin-bottom:8px"><a href="graph.html" style="color:#6af;font-size:13px;text-decoration:none;border:1px solid #6af;padding:3px 10px;border-radius:3px">&#129514; Beta</a></div>
-    <h3>Loot Sources</h3>
-    __RAID_CHECKBOXES__
-    <h3>Items</h3>
-    <div class="btns">
-      <button onclick="toggleAll('i_',true)">All</button>
-      <button onclick="toggleAll('i_',false)">None</button>
-    </div>
-    __ITEM_CHECKBOXES__
     <h3>Split into 2 teams</h3>
     <div class="btns">
       <button onclick="computeSplit()">Minimize shared items</button>
       <button onclick="clearSplit()">Clear</button>
     </div>
     <div id="splitInfo" class="muted"></div>
+    <h3>Loot Sources</h3>
+    __RAID_CHECKBOXES__
+    <h3>Items</h3>
+    <div class="btns">
+      <button onclick="toggleAll('i_',true)">All</button>
+      <button onclick="toggleAll('i_',false)">None</button>
+      <button id="itemToggleBtn" onclick="toggleItemList()">Show all</button>
+    </div>
+    <div id="itemList" class="collapsed">
+    __ITEM_CHECKBOXES__
+    </div>
     <div class="muted">Edges appear only for items in both filters.</div>
   </div>
   <div id="net"></div>
@@ -663,19 +709,31 @@ let currentEdges = [];
 let activeSplit = null;
 function cbId(prefix, key){ return prefix + btoa(unescape(encodeURIComponent(key))).replace(/=/g,''); }
 function toggleAll(prefix, val){
-  document.querySelectorAll('input[id^="'+prefix+'"]').forEach(c => {
-    if (c.closest('label').style.display !== 'none') c.checked = val;
-  });
+  if (prefix === 'i_') {
+    const activeRaids = new Set(RAIDS.filter(r => document.getElementById(cbId('r_',r)).checked));
+    for (const item of ITEMS) {
+      const raids = ITEM_RAIDS[item] || [];
+      if (raids.some(r => activeRaids.has(r))) document.getElementById(cbId('i_',item)).checked = val;
+    }
+  } else {
+    document.querySelectorAll('input[id^="'+prefix+'"]').forEach(c => { c.checked = val; });
+  }
   rebuildEdges();
 }
 function filterItemCheckboxes() {
   const activeRaids = new Set(RAIDS.filter(r => document.getElementById(cbId('r_',r)).checked));
+  const collapsed = document.getElementById('itemList').classList.contains('collapsed');
+  let shown = 0;
   for (const item of ITEMS) {
     const raids = ITEM_RAIDS[item] || [];
-    const visible = raids.some(r => activeRaids.has(r));
-    document.getElementById(cbId('i_',item)).closest('label').style.display = visible ? '' : 'none';
+    const raidVisible = raids.some(r => activeRaids.has(r));
+    const lbl = document.getElementById(cbId('i_',item)).closest('label');
+    if (!raidVisible) { lbl.style.display = 'none'; continue; }
+    if (collapsed && shown >= 5) { lbl.style.display = 'none'; continue; }
+    lbl.style.display = ''; shown++;
   }
 }
+function toggleItemList(){const l=document.getElementById('itemList'),b=document.getElementById('itemToggleBtn');l.classList.toggle('collapsed');b.textContent=l.classList.contains('collapsed')?'Show all':'Show top 5';filterItemCheckboxes();}
 function rebuildEdges() {
   filterItemCheckboxes();
   const activeRaids = new Set(RAIDS.filter(r => document.getElementById(cbId('r_',r)).checked));
@@ -740,6 +798,7 @@ stable_html = (stable_html
     .replace("__ITEMS__", json.dumps(items_all))
     .replace("__ITEM_RAIDS__", json.dumps(item_raids)))
 
-with open("index.html", "w", encoding="utf-8") as f:
-    f.write(stable_html)
-print(f"wrote index.html  (stable)")
+if "stable" in TARGETS:
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(stable_html)
+    print(f"wrote index.html  (stable)")

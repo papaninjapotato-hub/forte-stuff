@@ -4,21 +4,33 @@
 Visualize loot contention in a TBC Classic raid roster. Input is `Forte -TBC- Gear_Alts Tracker - Phase 1.csv`. Output is a self-contained HTML page showing players as nodes and shared-item needs as edges, with filters, a max-cut team splitter, and raid setup import.
 
 ## Files
-- `build_graph.py` — single script that parses the CSV and emits BOTH `graph.html` (beta, full feature set) and `index.html` (stable, no raid-import UI).
+- `build_graph.py` — builds the HTML page(s) from the CSV. Targets: `beta` → `graph.html` (full feature set incl. raid import), `stable` → `index.html` (reduced, no raid import), `promote` → writes beta HTML to `index.html`, `all` → `beta` + `promote`. Default (no args): `beta stable`.
 - `Forte -TBC- Gear_Alts Tracker - Phase 1.csv` — source roster. Updated periodically. Renamed from the original `Forte -TBC- Gear Tracker - Phase 1.csv`.
-- `index.html` — stable/production page, generated. Has a "🧪 Beta" link to `graph.html`.
-- `graph.html` — beta page, generated. Has a "← Stable" link back to `index.html`.
-- `Sat.json` / `Sun.json` — raid composition JSONs (from Discord comp tool). Used with the Import Raid Setup feature on the beta page.
+- `index.html` — production page served by GitHub Pages. Currently the **promoted beta** (has raid import). Rebuild as stable or beta depending on what you want to deploy.
+- `graph.html` — beta page. Has a "← Stable" link back to `index.html`.
+- `Sat.json` / `Sun.json` — raid composition JSONs (from Discord comp tool). Used with the Import Raid Setup feature.
 
 ## Build & deploy
 ```bash
-# Rebuild both pages (stable + beta) from the CSV:
+# Rebuild beta only (graph.html):
+python3 build_graph.py beta
+
+# Rebuild stable only (index.html, reduced):
+python3 build_graph.py stable
+
+# Promote beta → index.html (so main page == beta):
+python3 build_graph.py promote
+
+# Default: beta + stable (graph.html + reduced index.html):
 python3 build_graph.py
 
-# Deploy:
+# Everything current (beta + promoted index.html):
+python3 build_graph.py all
+
+# Deploy whatever you built:
 git add index.html graph.html && git commit -m "Update" && git push
 ```
-Both HTML files are regenerated every build from the same data; there is no manual promote step.
+Note: `stable` and `promote` both target `index.html`; the script refuses to run them together.
 Hosted on GitHub Pages at user `papaninjapotato-hub`, repo `forte-stuff`. Pages is set to deploy from `main` / root.
 
 ## Data model / normalization rules (authoritative)
