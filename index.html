@@ -99,7 +99,7 @@ function rebuildEdges() {
     const matched = e.items.filter(i => activeRaids.has(i.raid) && activeItems.has(i.item));
     if (matched.length === 0) continue;
     next.push({from:e.from,to:e.to,value:matched.length,weight:matched.length,
-      title:matched.length+' shared:<br>\u2022 '+matched.map(i=>i.item+' ('+i.raid+')').join('<br>\u2022 ')});
+      title:matched.length+' shared:\n\u2022 '+matched.map(i=>i.item+' ('+i.raid+')').join('\n\u2022 ')});
   }
   currentEdges = next; edges.clear(); edges.add(next);
   if (activeSplit) updateSplitStats();
@@ -137,7 +137,7 @@ function clearSplit(){activeSplit=null;nodes.update(NODES.map(n=>({id:n.id,color
 const network = new vis.Network(document.getElementById('net'),{nodes,edges},{
   layout:{randomSeed:42,improvedLayout:true},
   physics:{enabled:true,solver:'forceAtlas2Based',forceAtlas2Based:{gravitationalConstant:-80,springLength:180,springConstant:0.02,damping:0.9},stabilization:{enabled:true,iterations:1000,fit:true},timestep:0.3},
-  edges:{smooth:false,width:2,hoverWidth:4,color:{color:'#666',hover:'#aaa'}},
+  edges:{smooth:false,width:2,hoverWidth:4},
   interaction:{dragNodes:true,hover:true,zoomView:true,zoomSpeed:0.3,tooltipDelay:100,navigationButtons:true}
 });
 network.once('stabilizationIterationsDone',()=>network.setOptions({physics:false}));
