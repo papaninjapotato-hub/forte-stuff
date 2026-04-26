@@ -421,21 +421,21 @@ rebuildEdges();
 function setSelection(id) {
   if (selectedPlayer && selectedPlayer !== id) {
     const n = nodes.get(selectedPlayer);
-    nodes.update({id: selectedPlayer, borderWidth: 6, color: n._origColor || n.color});
+    if (n && n._origColor) nodes.update({id: selectedPlayer, color: n._origColor, _origColor: null});
   }
   selectedPlayer = id;
   if (id) {
     const n = nodes.get(id);
     const orig = n._origColor || n.color;
-    nodes.update({id, borderWidth: 10, _origColor: orig,
-      color: {background: '#4a3a00', border: '#ffd84a',
-              highlight: {background: '#4a3a00', border: '#ffd84a'}}});
+    const border = orig.border;
+    const hi = {background: '#4a5a6e', border,
+                highlight: {background: '#4a5a6e', border}};
+    nodes.update({id, _origColor: orig, color: hi});
   }
 }
 function restoreNodeColor(id) {
   const n = nodes.get(id);
-  if (n && n._origColor) nodes.update({id, borderWidth: 6, color: n._origColor, _origColor: null});
-  else nodes.update({id, borderWidth: 6});
+  if (n && n._origColor) nodes.update({id, color: n._origColor, _origColor: null});
 }
 function swapPlayers(aId, bId) {
   const raidA = activePlayerRaid[aId], raidB = activePlayerRaid[bId];
