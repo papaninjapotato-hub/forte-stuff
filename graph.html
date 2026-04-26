@@ -316,8 +316,8 @@ function setSelection(id) {
     const n = nodes.get(id);
     const orig = n._origColor || n.color;
     const border = orig.border;
-    const hi = {background: '#4a5a6e', border,
-                highlight: {background: '#4a5a6e', border}};
+    const hi = {background: '#2d7a8a', border,
+                highlight: {background: '#2d7a8a', border}};
     nodes.update({id, _origColor: orig, color: hi});
   }
 }
