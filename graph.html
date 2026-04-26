@@ -27,6 +27,18 @@
 <body><div id="wrap">
   <div id="side">
     <div style="text-align:right;margin-bottom:8px"><a href="index.html" style="color:#aaa;font-size:13px;text-decoration:none">&larr; Stable</a> <span style="color:#6af;font-size:13px;border:1px solid #6af;padding:3px 10px;border-radius:3px">&#129514; Beta</span></div>
+    <h3>Split into 2 teams</h3>
+    <div class="btns">
+      <button onclick="computeSplit()">Minimize shared items</button>
+      <button onclick="clearSplit()">Clear</button>
+    </div>
+    <div id="splitInfo" class="muted"></div>
+    <h3>Raid Setup</h3>
+    <div class="btns">
+      <button onclick="showImportModal()">Import Raid Setup</button>
+      <button onclick="clearRaidLayout()">Clear Layout</button>
+    </div>
+    <div id="raidInfo" class="muted"></div>
     <h3>Loot Sources</h3>
     <label><input type="checkbox" id="r_R3J1dWwgTGFpcg" checked> Gruul Lair</label>
 <label><input type="checkbox" id="r_S2FyYQ" checked> Kara</label>
@@ -35,7 +47,9 @@
     <div class="btns">
       <button onclick="toggleAll('i_',true)">All</button>
       <button onclick="toggleAll('i_',false)">None</button>
+      <button id="itemToggleBtn" onclick="toggleItemList()">Show all</button>
     </div>
+    <div id="itemList" class="collapsed">
     <label data-raids="Gruul Lair"><input type="checkbox" id="i_RHJhZ29uc3BpbmUgVHJvcGh5" checked> Dragonspine Trophy <span style="color:#888">(9)</span></label>
 <label data-raids="Kara"><input type="checkbox" id="i_TmF0aHJlemltIE1pbmRibGFkZQ" checked> Nathrezim Mindblade <span style="color:#888">(7)</span></label>
 <label data-raids="Kara"><input type="checkbox" id="i_RWRnZXdhbGtlciBMb25nYm9vdHM" checked> Edgewalker Longboots <span style="color:#888">(6)</span></label>
@@ -64,19 +78,8 @@
 <label data-raids="Kara"><input type="checkbox" id="i_VDQgSGFuZHMgW1dEUF0" checked> T4 Hands [WDP] <span style="color:#888">(2)</span></label>
 <label data-raids="Gruul Lair"><input type="checkbox" id="i_VDQgU2hvdWxkZXJzIFtQUlNd" checked> T4 Shoulders [PRS] <span style="color:#888">(2)</span></label>
 <label data-raids="Kara"><input type="checkbox" id="i_VGhlIExpZ2h0bmluZyBDYXBhY2l0b3I" checked> The Lightning Capacitor <span style="color:#888">(2)</span></label>
-    <h3>Split into 2 teams</h3>
-    <div class="btns">
-      <button onclick="computeSplit()">Minimize shared items</button>
-      <button onclick="clearSplit()">Clear</button>
     </div>
-    <div id="splitInfo" class="muted"></div>
     <div class="muted">Edges appear only for items in both filters.</div>
-    <h3>Raid Setup</h3>
-    <div class="btns">
-      <button onclick="showImportModal()">Import Raid Setup</button>
-      <button onclick="clearRaidLayout()">Clear Layout</button>
-    </div>
-    <div id="raidInfo" class="muted"></div>
   </div>
   <div id="net"></div>
 </div>
@@ -110,20 +113,38 @@ let raidDrawHandler = null;
 
 function cbId(prefix, key){ return prefix + btoa(unescape(encodeURIComponent(key))).replace(/=/g,''); }
 function toggleAll(prefix, val){
-  document.querySelectorAll('input[id^="'+prefix+'"]').forEach(c => {
-    if (c.closest('label').style.display !== 'none') c.checked = val;
-  });
+  if (prefix === 'i_') {
+    const activeRaids = new Set(RAIDS.filter(r => document.getElementById(cbId('r_',r)).checked));
+    for (const item of ITEMS) {
+      const raids = ITEM_RAIDS[item] || [];
+      if (raids.some(r => activeRaids.has(r))) document.getElementById(cbId('i_',item)).checked = val;
+    }
+  } else {
+    document.querySelectorAll('input[id^="'+prefix+'"]').forEach(c => { c.checked = val; });
+  }
   rebuildEdges();
 }
 
 function filterItemCheckboxes() {
   const activeRaids = new Set(RAIDS.filter(r => document.getElementById(cbId('r_',r)).checked));
+  const collapsed = document.getElementById('itemList').classList.contains('collapsed');
+  let shown = 0;
   for (const item of ITEMS) {
     const raids = ITEM_RAIDS[item] || [];
-    const visible = raids.some(r => activeRaids.has(r));
+    const raidVisible = raids.some(r => activeRaids.has(r));
     const lbl = document.getElementById(cbId('i_',item)).closest('label');
-    lbl.style.display = visible ? '' : 'none';
+    if (!raidVisible) { lbl.style.display = 'none'; continue; }
+    if (collapsed && shown >= 5) { lbl.style.display = 'none'; continue; }
+    lbl.style.display = '';
+    shown++;
   }
+}
+function toggleItemList() {
+  const list = document.getElementById('itemList');
+  const btn = document.getElementById('itemToggleBtn');
+  list.classList.toggle('collapsed');
+  btn.textContent = list.classList.contains('collapsed') ? 'Show all' : 'Show top 5';
+  filterItemCheckboxes();
 }
 
 function rebuildEdges() {
